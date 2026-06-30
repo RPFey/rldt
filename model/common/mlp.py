@@ -20,6 +20,8 @@ activation_dict = nn.ModuleDict(
         "Mish": nn.Mish(),
         "Identity": nn.Identity(),
         "Softplus": nn.Softplus(),
+        "SiLU": nn.SiLU(),
+        "LeakyReLU": nn.LeakyReLU(),
     }
 )
 

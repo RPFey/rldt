@@ -207,7 +207,7 @@ def make_async(
                 -1,
                 1,
                 shape=(obs_dim,),
-                dtype=np.float32,
+                dtype=np.float64,
             )
         env.observation_space = observation_space
         env.action_space = gym.spaces.Box(-1, 1, shape=(action_dim,), dtype=np.int64)

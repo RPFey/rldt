@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dppo"
+name = "rldt"
 version = "0.8.0"
-description = "Fine-tuning diffusion policies with PPO."
+description = "Reinforcement Learning for Flow Matching with Density Transport"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
@@ -43,7 +43,7 @@ robomimic = [
     "cython<3",
     "d4rl",
     "patchelf",
-    "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git",
+    "robomimic @ git+https://github.com/ARISE-Initiative/robomimic.git@v0.3.0",
     "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@v1.4.1",
 ]
 d3il = [

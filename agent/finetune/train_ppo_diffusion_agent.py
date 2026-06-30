@@ -4,6 +4,7 @@ DPPO fine-tuning.
 """
 
 import os
+import glob
 import pickle
 import einops
 import numpy as np
@@ -43,6 +44,66 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                 warmup_steps=cfg.train.eta_lr_scheduler.warmup_steps,
                 gamma=1.0,
             )
+            
+        # Try loading checkpoint for automatic resume
+        self.load_model(self.checkpoint_dir)
+
+    def save_model(self, save_numbered=False):
+        data = {
+            "itr": self.itr,
+            "model": self.model.state_dict(),
+            "actor_optimizer": self.actor_optimizer.state_dict(),
+            "critic_optimizer": self.critic_optimizer.state_dict(),
+            "actor_lr_scheduler": self.actor_lr_scheduler.state_dict(),
+            "critic_lr_scheduler": self.critic_lr_scheduler.state_dict(),
+        }
+        if self.learn_eta:
+            data["eta_optimizer"] = self.eta_optimizer.state_dict()
+            data["eta_lr_scheduler"] = self.eta_lr_scheduler.state_dict()
+
+        if save_numbered:
+            numbered_path = os.path.join(self.checkpoint_dir, f"state_{self.itr}.pt")
+            torch.save(data, numbered_path)
+            log.info(f"Saved numbered checkpoint at iteration {self.itr}")
+
+        # Always overwrite the rolling "latest" file for crash recovery
+        fpath = os.path.join(self.checkpoint_dir, "state_latest.pt")
+        if os.path.exists(fpath):
+            os.remove(fpath)
+        torch.save(data, fpath)
+        log.info(f"Saved latest checkpoint at iteration {self.itr}")
+
+    def load_model(self, load_path):
+        # Prefer the rolling "latest" checkpoint saved every iteration
+        latest_model_path = os.path.join(load_path, "state_latest.pt")
+        if not os.path.exists(latest_model_path):
+            # Fall back to numbered checkpoints
+            pt_files = glob.glob(os.path.join(load_path, "state_*.pt"))
+            epochs = []
+            for file in pt_files:
+                basename = os.path.basename(file)
+                epoch_str = basename.split('_')[1].split('.')[0]
+                try:
+                    epochs.append(int(epoch_str))
+                except ValueError:
+                    pass
+            if len(epochs) == 0:
+                log.warning(f"No model files found in {load_path}. Starting from scratch.")
+                return
+            latest_epoch = max(epochs)
+            latest_model_path = os.path.join(load_path, f"state_{latest_epoch}.pt")
+
+        checkpoint = torch.load(latest_model_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model"])
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer"])
+        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer"])
+        self.actor_lr_scheduler.load_state_dict(checkpoint["actor_lr_scheduler"])
+        self.critic_lr_scheduler.load_state_dict(checkpoint["critic_lr_scheduler"])
+        if self.learn_eta and "eta_optimizer" in checkpoint:
+            self.eta_optimizer.load_state_dict(checkpoint["eta_optimizer"])
+            self.eta_lr_scheduler.load_state_dict(checkpoint["eta_lr_scheduler"])
+        self.itr = checkpoint["itr"] + 1
+        log.info(f"Loaded checkpoint from {latest_model_path}, resuming at iteration {self.itr}")
 
     def run(self):
         # Start training loop
@@ -99,6 +160,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
+                self._check_cm()
                 if step % 10 == 0:
                     print(f"Processed step {step} of {self.n_steps}")
 
@@ -311,6 +373,7 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                     inds_k = torch.randperm(total_steps, device=self.device)
                     num_batch = max(1, total_steps // self.batch_size)  # skip last ones
                     for batch in range(num_batch):
+                        self._check_cm()
                         start = batch * self.batch_size
                         end = start + self.batch_size
                         inds_b = inds_k[start:end]  # b for batch
@@ -435,14 +498,15 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                     log.info(
                         f"eval: success rate {success_rate:8.4f} | avg episode reward {avg_episode_reward:8.4f} | avg best reward {avg_best_reward:8.4f}"
                     )
+                    eval_stats = {
+                        "success rate - eval": success_rate,
+                        "avg episode reward - eval": avg_episode_reward,
+                        "avg best reward - eval": avg_best_reward,
+                        "num episode - eval": num_episode_finished,
+                    }
                     if self.use_wandb:
                         wandb.log(
-                            {
-                                "success rate - eval": success_rate,
-                                "avg episode reward - eval": avg_episode_reward,
-                                "avg best reward - eval": avg_best_reward,
-                                "num episode - eval": num_episode_finished,
-                            },
+                            eval_stats,
                             step=self.itr,
                             commit=False,
                         )
@@ -453,27 +517,28 @@ class TrainPPODiffusionAgent(TrainPPOAgent):
                     log.info(
                         f"{self.itr}: step {cnt_train_step:8d} | loss {loss:8.4f} | pg loss {pg_loss:8.4f} | value loss {v_loss:8.4f} | bc loss {bc_loss:8.4f} | reward {avg_episode_reward:8.4f} | eta {eta:8.4f} | t:{time:8.4f}"
                     )
+                    stats_dict = {
+                            "total env step": cnt_train_step,
+                            "loss": loss,
+                            "pg loss": pg_loss,
+                            "value loss": v_loss,
+                            "bc loss": bc_loss,
+                            "eta": eta,
+                            "approx kl": approx_kl,
+                            "ratio": ratio,
+                            "clipfrac": np.mean(clipfracs),
+                            "explained variance": explained_var,
+                            "avg episode reward - train": avg_episode_reward,
+                            "num episode - train": num_episode_finished,
+                            "diffusion - min sampling std": diffusion_min_sampling_std,
+                            "actor lr": self.actor_optimizer.param_groups[0]["lr"],
+                            "critic lr": self.critic_optimizer.param_groups[0][
+                                "lr"
+                            ],
+                        }
                     if self.use_wandb:
                         wandb.log(
-                            {
-                                "total env step": cnt_train_step,
-                                "loss": loss,
-                                "pg loss": pg_loss,
-                                "value loss": v_loss,
-                                "bc loss": bc_loss,
-                                "eta": eta,
-                                "approx kl": approx_kl,
-                                "ratio": ratio,
-                                "clipfrac": np.mean(clipfracs),
-                                "explained variance": explained_var,
-                                "avg episode reward - train": avg_episode_reward,
-                                "num episode - train": num_episode_finished,
-                                "diffusion - min sampling std": diffusion_min_sampling_std,
-                                "actor lr": self.actor_optimizer.param_groups[0]["lr"],
-                                "critic lr": self.critic_optimizer.param_groups[0][
-                                    "lr"
-                                ],
-                            },
+                            stats_dict,
                             step=self.itr,
                             commit=True,
                         )

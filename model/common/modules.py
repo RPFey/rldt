@@ -22,8 +22,8 @@ class SpatialEmb(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.weight = nn.Parameter(torch.zeros(1, num_proj, proj_dim))
-        self.dropout = nn.Dropout(dropout)
-        nn.init.normal_(self.weight)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else None
+        nn.init.normal_(self.weight, std=1.0 / num_proj ** 0.5)
 
     def extra_repr(self) -> str:
         return f"weight: nn.Parameter ({self.weight.size()})"
@@ -37,11 +37,26 @@ class SpatialEmb(nn.Module):
 
         y = self.input_proj(feat)
         z = (self.weight * y).sum(1)
-        z = self.dropout(z)
+        z = z if self.dropout is None else self.dropout(z)
         return z
 
 
 class RandomShiftsAug:
+    """
+    Random shift augmentation for image tensors.
+
+    Pads each image by replicating border pixels, then applies a random
+    integer crop offset (up to `pad` pixels in each direction) uniformly
+    sampled per image in the batch. The crop is implemented via
+    `grid_sample`, so the output retains the original spatial resolution.
+
+    This is a lightweight, differentiable data augmentation that improves
+    translation invariance without distorting pixel values.
+
+    Args:
+        pad (int): Maximum number of pixels to shift in each direction.
+    """
+
     def __init__(self, pad):
         self.pad = pad
 

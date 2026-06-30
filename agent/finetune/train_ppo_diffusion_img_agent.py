@@ -4,6 +4,7 @@ DPPO fine-tuning for pixel observations.
 """
 
 import os
+import glob
 import pickle
 import einops
 import numpy as np
@@ -16,7 +17,6 @@ log = logging.getLogger(__name__)
 from util.timer import Timer
 from agent.finetune.train_ppo_diffusion_agent import TrainPPODiffusionAgent
 from model.common.modules import RandomShiftsAug
-
 
 class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
 
@@ -34,6 +34,66 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
 
         # Gradient accumulation to deal with large GPU RAM usage
         self.grad_accumulate = cfg.train.grad_accumulate
+
+        # Try loading checkpoint for automatic resume
+        self.load_model(self.checkpoint_dir)
+
+    def save_model(self, save_numbered=False):
+        data = {
+            "itr": self.itr,
+            "model": self.model.state_dict(),
+            "actor_optimizer_state": self.actor_optimizer.state_dict(),
+            "critic_optimizer_state": self.critic_optimizer.state_dict(),
+            "actor_lr_scheduler": self.actor_lr_scheduler.state_dict(),
+            "critic_lr_scheduler": self.critic_lr_scheduler.state_dict(),
+        }
+        if self.learn_eta:
+            data["eta_optimizer_state"] = self.eta_optimizer.state_dict()
+            data["eta_lr_scheduler"] = self.eta_lr_scheduler.state_dict()
+
+        if save_numbered:
+            numbered_path = os.path.join(self.checkpoint_dir, f"state_{self.itr}.pt")
+            torch.save(data, numbered_path)
+            log.info(f"Saved numbered checkpoint at iteration {self.itr}")
+
+        # Always overwrite the rolling "latest" file for crash recovery
+        fpath = os.path.join(self.checkpoint_dir, "state_latest.pt")
+        if os.path.exists(fpath):
+            os.remove(fpath)
+        torch.save(data, fpath)
+        log.info(f"Saved latest checkpoint at iteration {self.itr}")
+
+    def load_model(self, load_path):
+        # Prefer the rolling "latest" checkpoint saved every iteration
+        latest_model_path = os.path.join(load_path, "state_latest.pt")
+        if not os.path.exists(latest_model_path):
+            # Fall back to numbered checkpoints
+            pt_files = glob.glob(os.path.join(load_path, "state_*.pt"))
+            epochs = []
+            for file in pt_files:
+                basename = os.path.basename(file)
+                epoch_str = basename.split('_')[1].split('.')[0]
+                try:
+                    epochs.append(int(epoch_str))
+                except ValueError:
+                    pass
+            if len(epochs) == 0:
+                log.warning(f"No model files found in {load_path}. Starting from scratch.")
+                return
+            latest_epoch = max(epochs)
+            latest_model_path = os.path.join(load_path, f"state_{latest_epoch}.pt")
+
+        checkpoint = torch.load(latest_model_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint["model"])
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state"])
+        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state"])
+        self.actor_lr_scheduler.load_state_dict(checkpoint["actor_lr_scheduler"])
+        self.critic_lr_scheduler.load_state_dict(checkpoint["critic_lr_scheduler"])
+        if self.learn_eta and "eta_optimizer_state" in checkpoint:
+            self.eta_optimizer.load_state_dict(checkpoint["eta_optimizer_state"])
+            self.eta_lr_scheduler.load_state_dict(checkpoint["eta_lr_scheduler"])
+        self.itr = checkpoint["itr"]
+        log.info(f"Loaded checkpoint from {latest_model_path}, resuming at iteration {self.itr}")
 
     def run(self):
 
@@ -88,8 +148,16 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
 
             # Collect a set of trajectories from env
             for step in range(self.n_steps):
+                # store in (C, H, W)
+                if 'rgb' in prev_obs_venv and prev_obs_venv['rgb'].shape[-1] == 3:
+                    dims = list(range(prev_obs_venv['rgb'].ndim))
+                    dims[-1] = dims[-2]; dims[-2] = dims[-3]; dims[-3] = prev_obs_venv['rgb'].ndim - 1
+                    prev_obs_venv['rgb'] = np.transpose(prev_obs_venv['rgb'], dims)
+                    
                 if step % 10 == 0:
                     print(f"Processed step {step} of {self.n_steps}")
+                    
+                self._check_cm()
 
                 # Select action
                 with torch.no_grad():
@@ -307,6 +375,8 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
                     inds_k = torch.randperm(total_steps, device=self.device)
                     num_batch = max(1, total_steps // self.batch_size)  # skip last ones
                     for batch in range(num_batch):
+                        self._check_cm()
+                        
                         start = batch * self.batch_size
                         end = start + self.batch_size
                         inds_b = inds_k[start:end]  # b for batch
@@ -404,8 +474,10 @@ class TrainPPOImgDiffusionAgent(TrainPPODiffusionAgent):
             self.model.step()
             diffusion_min_sampling_std = self.model.get_min_sampling_denoising_std()
 
-            # Save model
-            if self.itr % self.save_model_freq == 0 or self.itr == self.n_train_itr - 1:
+            # Save model: numbered snapshot at interval, latest every iteration
+            if (self.itr % self.save_model_freq == 0 and self.itr > 0) or self.itr == self.n_train_itr - 1:
+                self.save_model(save_numbered=True)
+            else:
                 self.save_model()
 
             # Log loss and save metrics

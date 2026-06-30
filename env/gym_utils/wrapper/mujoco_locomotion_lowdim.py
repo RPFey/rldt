@@ -36,6 +36,8 @@ class MujocoLocomotionLowdimWrapper(gym.Env):
             dtype=low.dtype,
         )
 
+        self.video_writer = None
+
     def seed(self, seed=None):
         if seed is not None:
             np.random.seed(seed=seed)
@@ -44,13 +46,26 @@ class MujocoLocomotionLowdimWrapper(gym.Env):
 
     def reset(self, **kwargs):
         """Ignore passed-in arguments like seed"""
+        if self.video_writer is not None:
+            self.video_writer.close()
+            self.video_writer = None
+
         options = kwargs.get("options", {})
         new_seed = options.get("seed", None)
         if new_seed is not None:
             self.seed(seed=new_seed)
+
+        if "video_path" in options:
+            import imageio
+            self.video_writer = imageio.get_writer(options["video_path"], fps=30)
+
         raw_obs = self.env.reset()
 
-        # normalize
+        if self.video_writer is not None:
+            frame = self.env.render(mode="rgb_array")
+            if frame is not None:
+                self.video_writer.append_data(frame)
+
         obs = self.normalize_obs(raw_obs)
         return {"state": obs}
 
@@ -65,9 +80,23 @@ class MujocoLocomotionLowdimWrapper(gym.Env):
         raw_action = self.unnormalize_action(action)
         raw_obs, reward, done, info = self.env.step(raw_action)
 
-        # normalize
+        if self.video_writer is not None:
+            frame = self.env.render(mode="rgb_array")
+            if frame is not None:
+                self.video_writer.append_data(frame)
+
+        if done and self.video_writer is not None:
+            self.video_writer.close()
+            self.video_writer = None
+
         obs = self.normalize_obs(raw_obs)
         return {"state": obs}, reward, done, info
 
     def render(self, **kwargs):
         return self.env.render()
+
+    def close(self):
+        if self.video_writer is not None:
+            self.video_writer.close()
+            self.video_writer = None
+        self.env.close()

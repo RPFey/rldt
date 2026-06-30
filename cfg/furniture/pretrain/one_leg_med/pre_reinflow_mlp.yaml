@@ -1,0 +1,77 @@
+######################################################################
+###################################################################
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+
+
+_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+name: ${env}_pre_flowmatchings_mlp_ta${horizon_steps}_td${denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/furniture-pretrain/${task}_${randomness}_dim/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
+train_dataset_path: ${oc.env:DPPO_DATA_DIR}/furniture/${task}_${randomness}/train.npz
+
+seed: 42
+device: cuda:0
+task: one_leg
+randomness: med
+env: ${task}_${randomness}_dim
+obs_dim: 58
+action_dim: 10
+denoising_steps: 100
+horizon_steps: 8
+cond_steps: 1
+
+train:
+  n_epochs: 8000
+  batch_size: 256
+  val_freq: 10000
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  train_split: 0.9
+  lr_scheduler:
+    first_cycle_steps: 8000
+    warmup_steps: 100
+    min_lr: 1e-5
+  save_model_freq: 500
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY}
+  project: furniture-${env}-pretrain
+  run: ${now:%H-%M-%S}_${name}
+
+model:
+  _target_: model.flow.reflow.ReFlow
+  network:
+    _target_: model.flow.mlp_flow.FlowMLP #model.diffusion.mlp_diffusion.DiffusionMLP
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    time_dim: 32
+    mlp_dims: [1024, 1024, 1024, 1024, 1024, 1024, 1024]
+    cond_mlp_dims: [512, 64]
+    activation_type: ReLU
+    out_activation_type: Identity
+    use_layernorm: True
+    residual_style: True
+  device: ${device}
+  horizon_steps: ${horizon_steps}
+  action_dim: ${action_dim}
+  act_min: -1
+  act_max: 1
+  obs_dim: ${obs_dim}
+  max_denoising_steps: ${denoising_steps}
+  seed: ${seed}
+  sample_t_type: uniform # beta, logitnormal
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  cond_steps: ${cond_steps}
+  device: ${device}
+  max_n_episodes: -1

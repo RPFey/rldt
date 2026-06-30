@@ -107,7 +107,7 @@ class PreTrainAgent:
         if "train_split" in cfg.train and cfg.train.train_split < 1:
             val_indices = self.dataset_train.set_train_val_split(cfg.train.train_split)
             self.dataset_val = deepcopy(self.dataset_train)
-            self.dataset_val.set_indices(val_indices)
+            self.dataset_val.indices = val_indices
             self.dataloader_val = torch.utils.data.DataLoader(
                 self.dataset_val,
                 batch_size=self.batch_size,

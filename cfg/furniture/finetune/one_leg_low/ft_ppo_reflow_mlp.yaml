@@ -1,0 +1,137 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: agent.finetune.reinflow.train_ppo_flow_agent.TrainPPOFlowAgent
+
+name: ${env_name}_ft_ppo_reflow_mlp_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/furniture-finetune/one_leg_low/${name}/seed-${seed}
+base_policy_path: ${oc.env:DPPO_LOG_DIR}/furniture-pretrain/one_leg_low_dim/reinflow-baseconfig/2026-05-02_19-27-13_42/checkpoint/state_8000.pt
+normalization_path: ${oc.env:DPPO_DATA_DIR}/furniture/${env.specific.furniture}_${env.specific.randomness}/normalization.pth
+resume_path: null
+
+seed: 42
+device: cuda:0
+sim_device: cuda:0
+env_name: ${env.specific.furniture}_${env.specific.randomness}_dim
+obs_dim: 58
+action_dim: 10
+denoising_steps: 4
+ft_denoising_steps: 4
+min_std: 0.08
+max_std: 0.14
+cond_steps: 1
+horizon_steps: 8
+act_steps: 8
+
+env:
+  n_envs: 1000
+  name: ${env_name}
+  env_type: furniture
+  max_episode_steps: 700
+  best_reward_threshold_for_success: 1
+  specific:
+    headless: true
+    furniture: one_leg
+    randomness: low
+    normalization_path: ${normalization_path}
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    sparse_reward: True
+    record: False
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY}
+  project: furniture-${env.specific.furniture}-${env.specific.randomness}-finetune
+  run: ${now:%H-%M-%S}_${name}
+
+train:
+  n_train_itr: 1000
+  n_critic_warmup_itr: 1
+  n_steps: ${eval:'round(${env.max_episode_steps} / ${act_steps})'}
+  gamma: 0.999
+  actor_lr: 1e-5
+  actor_weight_decay: 0
+  actor_lr_scheduler:
+    type: cosine
+    first_cycle_steps: 1000
+    warmup_steps: 10
+    min_lr: 1e-6
+  critic_lr: 1e-3
+  critic_weight_decay: 0
+  critic_lr_scheduler:
+    type: cosine
+    first_cycle_steps: 1000
+    warmup_steps: 10
+    min_lr: 1e-3
+  save_model_freq: 50
+  val_freq: 10
+  render:
+    freq: 1
+    num: 0
+  reward_scale_running: True
+  reward_scale_const: 1.0
+  gae_lambda: 0.95
+  batch_size: 17600
+  update_epochs: 5
+  vf_coef: 0.5
+  ent_coef: 0.03
+  target_kl: 1.0
+  lr_schedule: fixed
+  repeat_samples: true
+  verbose: false
+  clip_intermediate_actions: true
+  account_for_initial_stochasticity: true
+  max_noise_hold_ratio: 0.35
+  max_noise_decay_ratio: 0.7
+
+model:
+  _target_: model.flow.ft_ppo.ppoflow.PPOFlow
+  device: ${device}
+  actor_policy_path: ${base_policy_path}
+  policy:
+    _target_: model.flow.mlp_flow.FlowMLP
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    time_dim: 32
+    mlp_dims: [1024, 1024, 1024, 1024, 1024, 1024, 1024]
+    cond_mlp_dims: [512, 64]
+    activation_type: ReLU
+    out_activation_type: Identity
+    use_layernorm: True
+    residual_style: True
+  critic:
+    _target_: model.common.critic.CriticObs
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    mlp_dims: [512, 512, 512]
+    activation_type: Mish
+    residual_style: True
+  act_dim: ${action_dim}
+  horizon_steps: ${horizon_steps}
+  act_min: -1
+  act_max: 1
+  obs_dim: ${obs_dim}
+  cond_steps: ${cond_steps}
+  noise_scheduler_type: learn_decay
+  inference_steps: ${denoising_steps}
+  ft_denoising_steps: ${ft_denoising_steps}
+  randn_clip_value: 3
+  min_sampling_denoising_std: ${min_std}
+  min_logprob_denoising_std: ${min_std}
+  max_logprob_denoising_std: ${max_std}
+  logprob_min: -1.0
+  logprob_max: 1.0
+  clip_ploss_coef: 0.01
+  clip_ploss_coef_base: 0.01
+  clip_ploss_coef_rate: 3
+  clip_vloss_coef: null
+  denoised_clip_value: 1.0
+  time_dim_explore: 0
+  learn_explore_time_embedding: false
+  use_time_independent_noise: false
+  noise_hidden_dims: [256, 256, 256]
+  logprob_debug_sample: false
+  logprob_debug_recalculate: false
+  explore_net_activation_type: Tanh

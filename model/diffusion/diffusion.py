@@ -197,7 +197,7 @@ class DiffusionModel(nn.Module):
 
     # ---------- Sampling ----------#
 
-    def p_mean_var(self, x, t, cond, index=None, network_override=None):
+    def p_mean_var(self, x, t, cond, index=None, network_override=None, deterministic=True):
         if network_override is not None:
             noise = network_override(x, t, cond=cond)
         else:

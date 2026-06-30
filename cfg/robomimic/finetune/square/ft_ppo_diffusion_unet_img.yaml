@@ -6,8 +6,8 @@ hydra:
 _target_: agent.finetune.train_ppo_diffusion_img_agent.TrainPPOImgDiffusionAgent
 
 name: ${env_name}_ft_diffusion_unet_img_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/robomimic-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
-base_policy_path: ${oc.env:DPPO_LOG_DIR}/robomimic-pretrain/square/square_pre_diffusion_unet_img_ta4_td100/2024-11-15_17-36-37_42/checkpoint/state_500.pt
+logdir: ${oc.env:DPPO_LOG_DIR}/robomimic-finetune/${env_name}-img/${name}/seed-${seed}
+base_policy_path: ${oc.env:DPPO_LOG_DIR}/robomimic-pretrain/square/square_pre_diffusion_unet_img_ta4_td100/2024-11-15_17-36-37_42/checkpoint/state_2000.pt
 robomimic_env_cfg_path: cfg/robomimic/env_meta/${env_name}-img.json
 normalization_path: ${oc.env:DPPO_DATA_DIR}/robomimic/${env_name}-img/normalization.npz
 
@@ -25,7 +25,7 @@ act_steps: 4
 use_ddim: True
 
 env:
-  n_envs: 50
+  n_envs: 64
   name: ${env_name}
   best_reward_threshold_for_success: 1
   max_episode_steps: 400
@@ -60,9 +60,9 @@ wandb:
   run: ${now:%H-%M-%S}_${name}
 
 train:
-  n_train_itr: 301
+  n_train_itr: 201
   n_critic_warmup_itr: 2
-  n_steps: 400
+  n_steps: 200
   gamma: 0.999
   augment: True
   grad_accumulate: 20
@@ -87,9 +87,9 @@ train:
   reward_scale_running: True
   reward_scale_const: 1.0
   gae_lambda: 0.95
-  batch_size: 500
-  logprob_batch_size: 1000
-  update_epochs: 10
+  batch_size: 640
+  logprob_batch_size: 640
+  update_epochs: 20
   vf_coef: 0.5
   target_kl: 1
 

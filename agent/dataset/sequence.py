@@ -135,8 +135,10 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
         Not doing validation right now
         """
         num_train = int(len(self.indices) * train_split)
-        train_indices = random.sample(self.indices, num_train)
-        val_indices = [i for i in range(len(self.indices)) if i not in train_indices]
+        train_index = random.sample(range(len(self.indices)), num_train)
+        val_index = [i for i in range(len(self.indices)) if i not in train_index]
+        train_indices = [self.indices[i] for i in train_index]
+        val_indices = [self.indices[i] for i in val_index]
         self.indices = train_indices
         return val_indices
 

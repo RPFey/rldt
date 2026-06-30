@@ -97,33 +97,24 @@ class VisionDiffusionMLP(nn.Module):
             use_layernorm=use_layernorm,
         )
         self.time_dim = time_dim
+    
+    def encode_rgb(self, cond):
+        """Encode RGB images and proprioceptive state into a single feature vector.
 
-    def forward(
-        self,
-        x,
-        time,
-        cond: dict,
-        **kwargs,
-    ):
+        Args:
+            cond: dict with key state/rgb; more recent obs at the end
+                state: (B, To, Do)
+                rgb: (B, To, C, H, W)
+
+        Returns:
+            cond_encoded: (B, visual_feature_dim + cond_dim)
         """
-        x: (B, Ta, Da)
-        time: (B,) or int, diffusion step
-        cond: dict with key state/rgb; more recent obs at the end
-            state: (B, To, Do)
-            rgb: (B, To, C, H, W)
-
-        TODO long term: more flexible handling of cond
-        """
-        B, Ta, Da = x.shape
-        _, T_rgb, C, H, W = cond["rgb"].shape
-
-        # flatten chunk
-        x = x.view(B, -1)
+        B, T_rgb, C, H, W = cond["rgb"].shape
 
         # flatten history
         state = cond["state"].view(B, -1)
 
-        # Take recent images --- sometimes we want to use fewer img_cond_steps than cond_steps (e.g., 1 image but 3 prio)
+        # Take recent images --- sometimes we want to use fewer img_cond_steps than cond_steps
         rgb = cond["rgb"][:, -self.img_cond_steps :]
 
         # concatenate images in cond by channels
@@ -159,7 +150,25 @@ class VisionDiffusionMLP(nn.Module):
             else:
                 feat = feat.flatten(1, -1)
                 feat = self.compress(feat)
+
         cond_encoded = torch.cat([feat, state], dim=-1)
+        return cond_encoded
+
+    def predict_velocity(self, cond_encoded, x, time):
+        """Run MLP to predict velocity given pre-encoded visual+state features.
+
+        Args:
+            cond_encoded: (B, visual_feature_dim + cond_dim) from encode_rgb
+            x: (B, Ta, Da)
+            time: (B,) or int, diffusion step
+
+        Returns:
+            out: (B, Ta, Da)
+        """
+        B, Ta, Da = x.shape
+
+        # flatten chunk
+        x = x.view(B, -1)
 
         # append time and cond
         time = time.view(B, 1)
@@ -169,6 +178,23 @@ class VisionDiffusionMLP(nn.Module):
         # mlp
         out = self.mlp_mean(x)
         return out.view(B, Ta, Da)
+
+    def forward(
+        self,
+        x,
+        time,
+        cond: dict,
+        **kwargs,
+    ):
+        """
+        x: (B, Ta, Da)
+        time: (B,) or int, diffusion step
+        cond: dict with key state/rgb; more recent obs at the end
+            state: (B, To, Do)
+            rgb: (B, To, C, H, W)
+        """
+        cond_encoded = self.encode_rgb(cond)
+        return self.predict_velocity(cond_encoded, x, time)
 
 
 class DiffusionMLP(nn.Module):

@@ -16,6 +16,9 @@ DPPO_LOG_DIR=${LOG_DIR:-$DEFAULT_LOG_DIR}  # Use user input or default if input 
 # Export to current session
 export DPPO_DATA_DIR="$DPPO_DATA_DIR"
 export DPPO_LOG_DIR="$DPPO_LOG_DIR"
+export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
+export CPATH=/usr/include:$CPATH
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/leiboshu/.mujoco/mujoco210/bin
 
 # Confirm the paths with the user
 echo "Data directory set to: $DPPO_DATA_DIR"

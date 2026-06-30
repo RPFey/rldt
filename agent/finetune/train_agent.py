@@ -4,12 +4,15 @@ Parent fine-tuning agent class.
 """
 
 import os
+import subprocess
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
 from omegaconf import OmegaConf
 import torch
 import hydra
 import logging
 import wandb
+from util.cluster_manager import ClusterStateManager
 import random
 
 log = logging.getLogger(__name__)
@@ -26,14 +29,28 @@ class TrainAgent:
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
+        
+        # cluster manager
+        self.cm = ClusterStateManager()
+        SLURM_JOB_ID = os.environ.get("SLURM_JOB_ID", 0)
 
         # Wandb
         self.use_wandb = cfg.wandb is not None
         if cfg.wandb is not None:
+            repo_dir = os.path.dirname(os.path.abspath(__file__))
+            log.info(f"Getting git commit hash from repo dir: {repo_dir}")
+            git_commit = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=repo_dir,
+                text=True,
+            ).strip()
+            run_id = f"{cfg.name}_{git_commit}"
             wandb.init(
                 entity=cfg.wandb.entity,
                 project=cfg.wandb.project,
-                name=cfg.wandb.run,
+                name=f"{cfg.wandb.run}-SLURM{SLURM_JOB_ID}",
+                id=run_id,
+                resume="allow",
                 config=OmegaConf.to_container(cfg, resolve=True),
             )
 
@@ -117,6 +134,10 @@ class TrainAgent:
             if "plotter" in cfg.train
             else None
         )
+        
+    def _check_cm(self):
+        if self.cm.should_exit(): 
+            self.cm.requeue()
 
     def run(self):
         pass

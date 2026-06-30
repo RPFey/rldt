@@ -529,11 +529,16 @@ class VisionUnet1D(nn.Module):
         cond: dict with key state/rgb; more recent obs at the end
             state: (B, To, obs_dim)
         """
-        B = len(x)
-        _, T_rgb, C, H, W = cond["rgb"].shape
-
-        # move chunk dim to the end
-        x = einops.rearrange(x, "b h t -> b t h")
+        cond_encoded = self.encode_rgb(cond)
+        return self.predict_velocity(cond_encoded, x, time)
+    
+    def encode_rgb(self, cond):
+        """ Encode the RGb Feaure 
+        
+        Args:
+            cond
+        """
+        B, T_rgb, C, H, W = cond["rgb"].shape
 
         # flatten history
         state = cond["state"].view(B, -1)
@@ -578,19 +583,34 @@ class VisionUnet1D(nn.Module):
             else:
                 feat = feat.flatten(1, -1)
                 feat = self.compress(feat)
+                
         cond_encoded = torch.cat([feat, state], dim=-1)
+        return cond_encoded
 
-        # 1. time
+    def predict_velocity(self, cond_encoded, x, time):
+        """Run UNet to predict velocity given pre-encoded visual+state features.
+
+        Args:
+            cond_encoded: (B, visual_feature_dim + state_dim) from encode_rgb
+            x: (B, Ta, act_dim)
+            time: (B,) or int, diffusion step
+
+        Returns:
+            x: (B, Ta, act_dim)
+        """
+        # move chunk dim to the end
+        x = einops.rearrange(x, "b h t -> b t h")
+
+        # time embedding
         if not torch.is_tensor(time):
             time = torch.tensor([time], dtype=torch.long, device=x.device)
         elif torch.is_tensor(time) and len(time.shape) == 0:
             time = time[None].to(x.device)
-        # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         time = time.expand(x.shape[0])
         global_feature = self.time_mlp(time)
         global_feature = torch.cat([global_feature, cond_encoded], axis=-1)
 
-        # encode local features
+        # UNet down
         h_local = list()
         h = []
         for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
@@ -604,6 +624,7 @@ class VisionUnet1D(nn.Module):
         for mid_module in self.mid_modules:
             x = mid_module(x, global_feature)
 
+        # UNet up
         for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
             x = torch.cat((x, h.pop()), dim=1)
             x = resnet(x, global_feature)
@@ -613,7 +634,6 @@ class VisionUnet1D(nn.Module):
             x = upsample(x)
 
         x = self.final_conv(x)
-
         x = einops.rearrange(x, "b t h -> b h t")
         return x
 

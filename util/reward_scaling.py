@@ -1,10 +1,29 @@
+# MIT License
+
+# Copyright (c) 2024 Intelligent Robot Motion Lab
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 """
-To balance actor and critic losses, the rewards are divided through by the standard deviation of a rolling discounted sum of the rewards (without subtracting and re-adding the mean).
-
+To balance actor and critic losses, the rewards are divided through by the standard deviation of a rolling discounted 
+sum of the rewards (without subtracting and re-adding the mean).
 Code is based on: https://github.com/openai/phasic-policy-gradient/blob/master/phasic_policy_gradient/reward_normalizer.py
-
 Reference: https://arxiv.org/pdf/2005.12729.pdf
-
 """
 
 import numpy as np
@@ -71,6 +90,64 @@ class RunningRewardScaler:
             -self.cliprew,
             self.cliprew,
         )
+
+
+class EMARewardScaler:
+    """
+    Scales rewards by the EMA of mean absolute reward magnitude.
+    Designed for batch-level processing (whole trajectories collected per iteration).
+
+    Unlike RunningRewardScaler, this does not require step-by-step updates and
+    handles sparse-reward cold starts (all-zero batches) gracefully.
+    """
+
+    def __init__(self, alpha: float = 0.05, epsilon: float = 1e-8):
+        """
+        Args:
+            alpha:   EMA decay rate. Smaller = slower adaptation.
+            epsilon: Numerical stability floor.
+        """
+        self.alpha = alpha
+        self.epsilon = epsilon
+        self._ema: float = -1.0  # -1 signals uninitialized
+
+    @property
+    def scale(self) -> float:
+        if self._ema <= 0:
+            return 1.0
+        return 1.0 / (self._ema + self.epsilon)
+
+    def update(self, rewards: np.ndarray) -> None:
+        """Update EMA from a batch of rewards (any shape)."""
+        batch_mean_abs = float(np.mean(np.abs(rewards)))
+        if batch_mean_abs < self.epsilon:
+            return  # skip all-zero batches to avoid collapsing the scale
+        if self._ema < 0:
+            self._ema = batch_mean_abs  # cold-start: seed with first non-zero batch
+        else:
+            self._ema = (1.0 - self.alpha) * self._ema + self.alpha * batch_mean_abs
+
+    def __call__(self, rewards: np.ndarray, update: bool = True) -> np.ndarray:
+        """
+        Optionally update the EMA, then return scaled rewards.
+
+        Args:
+            rewards: raw reward array (any shape).
+            update:  whether to update EMA stats from this batch.
+        Returns:
+            Scaled reward array (same shape and dtype as input).
+        """
+        if update:
+            self.update(rewards)
+        return rewards * self.scale
+
+    def state_dict(self) -> dict:
+        return {"ema": self._ema, "alpha": self.alpha, "epsilon": self.epsilon}
+
+    def load_state_dict(self, d: dict) -> None:
+        self._ema = d["ema"]
+        self.alpha = d["alpha"]
+        self.epsilon = d["epsilon"]
 
 
 def backward_discounted_sum(

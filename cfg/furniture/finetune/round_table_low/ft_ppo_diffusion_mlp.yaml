@@ -6,8 +6,8 @@ hydra:
 _target_: agent.finetune.train_ppo_diffusion_agent.TrainPPODiffusionAgent
 
 name: ${env_name}_ft_diffusion_mlp_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
-logdir: ${oc.env:DPPO_LOG_DIR}/furniture-finetune/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
-base_policy_path: ${oc.env:DPPO_LOG_DIR}/furniture-pretrain/round_table/round_table_low_dim_pre_diffusion_mlp_ta8_td100/2024-07-23_01-28-26/checkpoint/state_8000.pt
+logdir: ${oc.env:DPPO_LOG_DIR}/furniture-finetune/round_table_low/${name}/seed-${seed}
+base_policy_path: ${oc.env:DPPO_LOG_DIR}/furniture-pretrain/round_table_low_dim/pre_diffusion/2026-04-04_06-09-52_42/checkpoint/state_8000.pt
 normalization_path: ${oc.env:DPPO_DATA_DIR}/furniture/${env.specific.furniture}_${env.specific.randomness}/normalization.pth
 
 seed: 42

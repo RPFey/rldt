@@ -1,0 +1,142 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: agent.finetune.train_fm_svgd_agent.FMSVGDAgent
+
+name: ${env_name}_ft_diffusion_mlp_ta${horizon_steps}_td${denoising_steps}_tdf${ft_denoising_steps}
+logdir: ${oc.env:DPPO_LOG_DIR}/furniture-finetune/lamp_low/${name}/seed-${seed}
+base_policy_path: ${oc.env:DPPO_LOG_DIR}/furniture-pretrain/lamp_low_dim/base_config/2026-02-13_21-06-17_42/checkpoint/state_8000.pt
+normalization_path: ${oc.env:DPPO_DATA_DIR}/furniture/${env.specific.furniture}_${env.specific.randomness}/normalization.pth
+
+seed: 42
+device: cuda:0
+env_name: ${env.specific.furniture}_${env.specific.randomness}_dim
+obs_dim: 44
+action_dim: 10
+denoising_steps: 32
+ft_denoising_steps: 5
+cond_steps: 1
+horizon_steps: 8
+act_steps: 8
+use_ddim: True
+
+env:
+  n_envs: 1000
+  name: ${env_name}
+  env_type: furniture
+  max_episode_steps: 1000
+  best_reward_threshold_for_success: 2
+  specific:
+    headless: true
+    furniture: lamp
+    randomness: low
+    normalization_path: ${normalization_path}
+    obs_steps: ${cond_steps}
+    act_steps: ${act_steps}
+    sparse_reward: True
+    record: False
+
+wandb:
+  entity: ${oc.env:DPPO_WANDB_ENTITY}
+  project: furniture-${env.specific.furniture}-${env.specific.randomness}-finetune
+  run: ${now:%H-%M-%S}_${name}
+
+train:
+  n_train_itr: 251
+  n_critic_warmup_itr: 2
+  n_steps: ${eval:'round(${env.max_episode_steps} / ${act_steps})'}
+  gamma: 0.995
+  actor_lr: 1e-5
+  actor_weight_decay: 0
+  actor_lr_scheduler:
+    first_cycle_steps: 10000
+    warmup_steps: 10
+    min_lr: 1e-6
+  critic_lr: 1e-3
+  critic_weight_decay: 0
+  critic_lr_scheduler:
+    first_cycle_steps: 10000
+    warmup_steps: 10
+    min_lr: 1e-3
+  save_model_freq: 100
+  val_freq: 10
+  render:
+    freq: 1
+    num: 0
+  batch_size: 50400
+  buffer_num_episode: 20          # number of episodes to store in the buffer for each iteration of training.
+  # Q network
+  q_update_steps: 512
+  new_fraction: 0.33              # fraction of fresh samples in the buffer to use for q update.
+  td_lambda: 0.5                  # TD lambda parameter for computing targets. If -1, will use n-step returns. If > 0, will use TD(lambda) returns.
+  q_repeat: 16                     # number of iterations to sample from the policy to cmpute targets
+  q_init_std: 0.1
+  q_update_lr: 0.0005
+  reward_scale: 1.0               # reward scale - positive; negative - EMA normalization
+  q_bootstrap: 2                  # number of actions to bootstrap for in q learning.
+  ensemble_q: 2                   # number of q functions in the ensemble
+  q_target_mom: 0.995
+  q_split_mode: traj
+  weighted_sample: true           # half-half nonzero vs. zero reward traj.
+  gradq_net_idx: -1               # -1 -take the average of Q grad; 0 - alternate between Q functions each update
+  q_target_max: ${env.best_reward_threshold_for_success}  # min-max value to clip the q targets.
+  q_target_min: 0.0
+  q_norm_max: 100000.0
+  q_norm_min: 0.0
+  q_norm_reg: 0.00000001
+  # SVGD
+  svgd_temp: 0.001                # temp before nabla_x phi(x_i, x_j) - repulsion force
+  policy_update_steps: 32
+  fm_update_lr: 0.00002
+  fm_lr_scheduler:
+    warmup_steps: 32
+  n_particles: 8                  # number of particles to use for SVGD policy update.
+  kl_coef: 0.2                   # KL regularization
+  q_norm: svgd
+  rbf_bandwith: -1.0
+  svgd_type: normal
+  consistency_coef: 0.5
+  sqrt_distance: false
+  # exploration related
+  action_sample_noise: 0.02
+  sample_mode: full
+  # Full Mode
+  noise_mode: min_extrp
+  epsilon_ratio: 0.2
+  # Extrapolate Mode
+  min_extrp_step: 30
+  # Time conditioning
+  rollout_stage_cond: true
+  mean_sampling: false
+
+model:
+  _target_: model.diffusion.fm_svgd.FM_SVGD
+  network_path: ${base_policy_path}
+  actor:
+    _target_: model.diffusion.mlp_diffusion.DiffusionMLP
+    time_dim: 32
+    mlp_dims: [1024, 1024, 1024, 1024, 1024, 1024, 1024]
+    cond_mlp_dims: [512, 64]
+    use_layernorm: True # needed for larger MLP
+    residual_style: True
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+  critic:
+    _target_: model.common.critic.CriticObsAct
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps} + 1'}
+    mlp_dims: [512, 512, 512]
+    activation_type: SiLU
+    residual_style: False
+    use_layernorm: False
+    action_dim: ${eval:'${action_dim} * ${act_steps}'} # 80
+    double_q: True
+  ft_denoising_steps: ${ft_denoising_steps}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  device: ${device}
+  prediction_type: v_pred             # output parameterization; v_pred - predict the velocity; x_pred - predict the clean sample

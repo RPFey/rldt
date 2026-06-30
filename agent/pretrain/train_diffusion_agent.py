@@ -6,6 +6,7 @@ Pre-training diffusion policy
 import logging
 import wandb
 import numpy as np
+import torch
 
 log = logging.getLogger(__name__)
 from util.timer import Timer
@@ -46,15 +47,23 @@ class TrainDiffusionAgent(PreTrainAgent):
 
             # validate
             loss_val_epoch = []
+            mse_actions_epoch = []
             if self.dataloader_val is not None and self.epoch % self.val_freq == 0:
                 self.model.eval()
                 for batch_val in self.dataloader_val:
                     if self.dataset_val.device == "cpu":
                         batch_val = batch_to_device(batch_val)
-                    loss_val, infos_val = self.model.loss(*batch_val)
+                    loss_val = self.model.loss(batch_val.actions, batch_val.conditions)
                     loss_val_epoch.append(loss_val.item())
+
+                    # sample actions and compute mse actions
+                    sampled_actions = self.model(batch_val.conditions, deterministic=True)
+                    mse_actions = ((sampled_actions.trajectories - batch_val.actions) ** 2).mean().item()
+                    mse_actions_epoch.append(mse_actions)
                 self.model.train()
+            
             loss_val = np.mean(loss_val_epoch) if len(loss_val_epoch) > 0 else None
+            mse_actions_val = np.mean(mse_actions_epoch) if len(mse_actions_epoch) > 0 else None
 
             # update lr
             self.lr_scheduler.step()
@@ -71,11 +80,16 @@ class TrainDiffusionAgent(PreTrainAgent):
                 if self.use_wandb:
                     if loss_val is not None:
                         wandb.log(
-                            {"loss - val": loss_val}, step=self.epoch, commit=False
+                            {"loss - val": loss_val,
+                             "mse actions - val": mse_actions_val}, step=self.epoch, commit=False
+                        )
+                        log.info(
+                            f"{self.epoch}: val loss {loss_val:8.4f} | val mse actions {mse_actions_val:8.4f} | t:{timer():8.4f}"
                         )
                     wandb.log(
                         {
                             "loss - train": loss_train,
+                            "learning_rate": self.optimizer.param_groups[0]["lr"],
                         },
                         step=self.epoch,
                         commit=True,
