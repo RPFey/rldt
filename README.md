@@ -2,7 +2,7 @@
 
 [[Paper](https://arxiv.org/abs/2606.08602)]&nbsp;&nbsp;[[Website](https://rpfey.github.io/rldt-web/)]
 
-[Boshu Lei](https://allenzren.github.io/)<sup>1</sup>, [Kostas Daniilidis](https://jlidard.github.io/)<sup>1</sup>, [Antonio Loqercio](https://ankile.com/)<sup>1</sup>
+[Boshu Lei](https://rpfey.github.io/)<sup>1</sup>, [Kostas Daniilidis](https://www.cis.upenn.edu/~kostas/)<sup>1</sup>, [Antonio Loqercio](https://antonilo.github.io/)<sup>1</sup>
 
 <sup>1</sup>University of Pennsylvania
 

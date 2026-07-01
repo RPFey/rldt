@@ -28,7 +28,7 @@ pip install -e python --no-cache-dir --force-reinstall
 **Note:** You will most likely encounter the error ```ImportError: libpython3.8.so.1.0: cannot open shared object file: No such file or directory``` when you run fine-tuning. You may fix it by (add to .bashrc if you want it permanently):
 ```console 
 conda env list # print your conda_path
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<conda_path>/envs/dppo/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${CONDA_PREFIX}/lib
 ```
 
 ### Furniture-Bench
