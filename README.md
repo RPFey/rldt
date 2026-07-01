@@ -8,7 +8,7 @@
 
 <img src="https://rpfey.github.io/rldt-web/static/images/pipeline.png" alt="drawing" width="100%"/>
 
-This repository is built on top of the DPPO repository.
+This repository is built on top of the [DPPO](https://github.com/irom-princeton/dppo) repository.
 
 ## Installation
 
